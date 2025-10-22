@@ -1,5 +1,63 @@
+import os
+
 from pydantic import BaseModel, Field, validator
 from typing import List, Dict, Optional, Union
+
+class CPUConfig(BaseModel):
+    intra_op_threads: Optional[int] = None       # torch.set_num_threads
+    inter_op_threads: Optional[int] = None       # torch.set_num_interop_threads
+    omp_num_threads: Optional[int] = None        # OMP_NUM_THREADS
+    mkl_num_threads: Optional[int] = None        # MKL_NUM_THREADS
+    kmp_affinity: Optional[str] = "granularity=fine,compact,1,0"
+    start_method: str = "forkserver"             # "spawn" on Windows
+    pin_affinity_cores: Optional[List[int]] = None  # e.g. [0,1,2,3]; None = no pinning
+
+class DataloaderConfig(BaseModel):
+    num_workers: Optional[int] = None            # None -> auto (cores-1)
+    prefetch_factor: int = 4
+    persistent_workers: bool = True
+    pin_memory: bool = True
+    pin_memory_device: str = "cuda"              # torch>=2.1
+    non_blocking: bool = True
+
+class CUDAConfig(BaseModel):
+    enabled: bool = True
+    device_ids: Optional[List[int]] = None       # None -> auto discover
+    allow_tf32: bool = True
+    matmul_precision: str = "high"               # "highest" | "high" | "medium"
+    cudnn_benchmark: bool = True
+    cudnn_deterministic: Optional[bool] = None   # None -> respect TrainConfig.deterministic
+    amp: bool = True
+    amp_dtype: str = "bf16"                      # "bf16" or "fp16"
+    grad_scaler_enabled: bool = True             # auto disabled if amp_dtype="bf16"
+    compile_mode: Optional[str] = "reduce-overhead"  # None|"default"|"reduce-overhead"|"max-autotune"
+    compile_fullgraph: bool = False
+    uva: bool = False                            # DGL/PyG neighbor sampling (UVA) on supported GPUs
+
+    @validator("matmul_precision")
+    def _matmul_ok(cls, v):
+        assert v in {"highest", "high", "medium"}
+        return v
+    @validator("amp_dtype")
+    def _amp_ok(cls, v):
+        assert v in {"bf16", "fp16"}
+        return v
+
+class DDPConfig(BaseModel):
+    enabled: bool = False
+    backend: str = "nccl"
+    find_unused_parameters: bool = False
+    gradient_as_bucket_view: bool = True
+    broadcast_buffers: bool = False
+    static_graph: bool = False
+
+class SystemConfig(BaseModel):
+    cpu: CPUConfig = CPUConfig()
+    dataloader: DataloaderConfig = DataloaderConfig()
+    cuda: CUDAConfig = CUDAConfig()
+    ddp: DDPConfig = DDPConfig()
+    numexpr_threads = os.cpu_count()//4
+    deterministic = True
 
 class DataColumnsConfig(BaseModel):
     numeric: List[str]
@@ -64,7 +122,7 @@ class EdgeFeatConfig(BaseModel):
 class GraphConfig(BaseModel):
     node_types_enabled: Dict[str, bool]
     edge_types_enabled: Dict[str, bool]
-    edge_featureing: Dict[str, EdgeFeatConfig] = Field(default_factory=dict)
+    edge_featuring: Dict[str, EdgeFeatConfig] = Field(default_factory=dict)
     feature_dims: Dict[str, Union[int, Dict[str, int]]] = Field(default_factory=dict)
     oov_nodes: bool = True
     artifacts_dir: str = "./artifacts"
@@ -96,7 +154,6 @@ class SchedulerConfig(BaseModel):
 
 class BatchingConfig(BaseModel):
     batch_size_encounters: int = 128
-    fanouts_per_layer_by_relation: Dict[str, List[int]] = Field(default_factory=dict)
 
 class TrainConfig(BaseModel):
     epochs: int
@@ -164,6 +221,8 @@ class Config(BaseModel):
     inference: InferenceConfig
     baseline: BaselineConfig
     path: PathConfig
+    system: SystemConfig = SystemConfig()
+
 
     @validator("model")
     def check_model_arch(cls, v):
