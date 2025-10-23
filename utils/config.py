@@ -56,7 +56,7 @@ class SystemConfig(BaseModel):
     dataloader: DataloaderConfig = DataloaderConfig()
     cuda: CUDAConfig = CUDAConfig()
     ddp: DDPConfig = DDPConfig()
-    numexpr_threads = os.cpu_count()//4
+    numexpr_threads: int = os.cpu_count()//4
     deterministic = True
 
 class DataColumnsConfig(BaseModel):

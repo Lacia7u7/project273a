@@ -125,10 +125,8 @@ def find_best_threshold(
     optimize_for: str = "f1_pos",
     grid: Optional[Iterable[float]] = None,
     num_calibration_bins: int = 10,
-) -> Dict[str, float]:
+):
     """Find the best probability threshold for the requested metric.
-
-    Returns a dictionary with the chosen threshold and the metric value.
     """
 
     metric_name = _ensure_supported([optimize_for])[0]
@@ -153,4 +151,4 @@ def find_best_threshold(
             best_val = float(val)
             best_thr = float(thr)
 
-    return {"threshold": best_thr, "metric": metric_name, "metric_value": best_val}
+    return best_thr, metric_name, best_val
