@@ -57,7 +57,7 @@ class SystemConfig(BaseModel):
     cuda: CUDAConfig = CUDAConfig()
     ddp: DDPConfig = DDPConfig()
     numexpr_threads: int = os.cpu_count()//4
-    deterministic = True
+    deterministic:bool = True
 
 class DataColumnsConfig(BaseModel):
     numeric: List[str]
