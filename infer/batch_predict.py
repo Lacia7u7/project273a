@@ -1,6 +1,7 @@
 import pandas as pd
 import torch
-from src.graph.inductive import build_star_graph_for_row
+
+from graph.inductive import build_star_graph_for_row
 
 def batch_predict(csv_path: str, model, vocabs, config):
     df_new = pd.read_csv(csv_path)
