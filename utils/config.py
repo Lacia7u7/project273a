@@ -123,6 +123,7 @@ class GraphConfig(BaseModel):
     node_types_enabled: Dict[str, bool]
     edge_types_enabled: Dict[str, bool]
     edge_featuring: Dict[str, EdgeFeatConfig] = Field(default_factory=dict)
+    fanouts: Dict[str, List[int]]
     feature_dims: Dict[str, Union[int, Dict[str, int]]] = Field(default_factory=dict)
     oov_nodes: bool = True
     artifacts_dir: str = "./artifacts"
