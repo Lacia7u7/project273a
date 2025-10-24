@@ -1,6 +1,8 @@
 import json
 import pickle
 import os
+
+import pandas as pd
 import torch
 
 def save_config(config, path: str):
@@ -35,3 +37,9 @@ def save_scaler(scaler, path: str):
 def load_scaler(path: str):
     with open(path, "rb") as f:
         return pickle.load(f)
+
+
+def load_csv(csv_path: str) -> pd.DataFrame:
+    """Load the dataset CSV into a pandas DataFrame"""
+    df = pd.read_csv(csv_path)
+    return df

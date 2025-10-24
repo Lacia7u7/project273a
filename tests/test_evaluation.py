@@ -1,8 +1,8 @@
 import numpy as np
 from types import SimpleNamespace
 
-from train.evaluation import EvaluationResult, evaluate_predictions, tune_threshold_from_config
-from train.metrics import compute_metrics, find_best_threshold
+from evaluation.evaluation import EvaluationResult, evaluate_predictions, tune_threshold_from_config
+from evaluation.metrics import compute_metrics, find_best_threshold
 
 
 def _make_eval_config():
@@ -33,11 +33,10 @@ def test_find_best_threshold_returns_dict():
     y_true = [0, 0, 1, 1]
     y_prob = [0.2, 0.3, 0.7, 0.8]
 
-    result = find_best_threshold(y_true, y_prob, optimize_for="precision_pos", grid=[0.4, 0.5, 0.6])
+    best_thr, metric_name, best_val = find_best_threshold(y_true, y_prob, optimize_for="precision_pos", grid=[0.4, 0.5, 0.6])
 
-    assert set(result.keys()) == {"threshold", "metric", "metric_value"}
-    assert result["metric"] == "precision_pos"
-    assert 0.4 <= result["threshold"] <= 0.6
+    assert metric_name == "precision_pos"
+    assert 0.4 <= best_thr <= 0.6
 
 
 def test_tune_threshold_from_config_uses_grid():
@@ -45,10 +44,9 @@ def test_tune_threshold_from_config_uses_grid():
     y_true = [0, 0, 1, 1]
     y_prob = [0.2, 0.4, 0.7, 0.9]
 
-    tuning = tune_threshold_from_config(y_true, y_prob, config)
+    best_thr, metric_name, best_val = tune_threshold_from_config(y_true, y_prob, config)
 
-    assert tuning is not None
-    assert tuning["threshold"] in config.evaluation.threshold_tuning.grid
+    assert best_thr in config.evaluation.threshold_tuning.grid
 
 
 def test_evaluate_predictions_returns_dataclass():

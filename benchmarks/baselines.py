@@ -1,15 +1,12 @@
-import numpy as np
 from typing import Dict
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
-from lightgbm import LGBMClassifier
-from sklearn.svm import SVC, LinearSVC
 from sklearn.neighbors import KNeighborsClassifier
-from train.evaluation import EvaluationResult, evaluate_predictions
-from train.metrics import compute_metrics
+from evaluation.evaluation import EvaluationResult, evaluate_predictions
+from evaluation.metrics import compute_metrics
 from tqdm.auto import tqdm
 
 

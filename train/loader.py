@@ -1,7 +1,7 @@
 import os
 from typing import Any
 
-from train.sampling import build_num_neighbors
+from data.sampling import build_num_neighbors
 
 
 def make_loader(ds, config, train=True, shuffle=True, sampler=None):

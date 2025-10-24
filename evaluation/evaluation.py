@@ -6,8 +6,8 @@ from typing import Any, Dict, Iterable, Mapping, Optional
 import numpy as np
 import pandas as pd
 
-from train.calibration import apply_calibration, fit_calibrator_from_config
-from train.metrics import compute_metrics, find_best_threshold
+from evaluation.calibration import apply_calibration, fit_calibrator_from_config
+from evaluation.metrics import compute_metrics, find_best_threshold
 
 
 @dataclass

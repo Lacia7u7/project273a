@@ -3,11 +3,6 @@ import pandas as pd
 from data import csv_mapper
 
 
-def load_csv(csv_path: str) -> pd.DataFrame:
-    """Load the dataset CSV into a pandas DataFrame"""
-    df = pd.read_csv(csv_path)
-    return df
-
 def apply_filters(df: pd.DataFrame, config) -> pd.DataFrame:
     """Apply filtering criteria (LOS, discharge disposition, first encounter, etc.) to DataFrame"""
     cfg = config.data

@@ -20,7 +20,7 @@ def _make_config(fanouts, *, num_layers=2):
 
 
 def test_build_num_neighbors_respects_config(monkeypatch):
-    from train import sampling
+    from data import sampling
 
     class DummyGraph:
         edge_types = [
