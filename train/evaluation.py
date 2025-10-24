@@ -1,125 +1,117 @@
-from __future__ import annotations
-
-from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Mapping, Optional
-
 import numpy as np
-import pandas as pd
+from typing import Dict
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from train.evaluation import EvaluationResult, evaluate_predictions
+from train.metrics import compute_metrics
+from tqdm.auto import tqdm  # Import tqdm
 
-from train.calibration import apply_calibration, fit_calibrator_from_config
-from train.metrics import compute_metrics, find_best_threshold
-
-
-@dataclass
-class EvaluationResult:
-    """Structured container for evaluation artefacts."""
-
-    split: str
-    threshold: float
-    metrics_primary: Dict[str, float]
-    metrics_secondary: Dict[str, float]
-    metrics_all: Dict[str, float]
-    threshold_tuning: Optional[Dict[str, float]]
-    calibration_model: Any = None
-    subgroup_metrics: Optional[Dict[str, Dict[Any, Dict[str, float]]]] = None
-
-
-def _select_metrics(source: Mapping[str, float], wanted: Iterable[str]) -> Dict[str, float]:
-    return {name: source.get(name, float("nan")) for name in wanted}
+def _predict_proba_or_score(model, X):
+    if hasattr(model, "predict_proba"):
+        proba = model.predict_proba(X)
+        if proba.ndim == 2 and proba.shape[1] > 1:
+            return proba[:, 1]
+        return proba.reshape(-1)
+    return model.decision_function(X)
 
 
-def _prepare_metadata(metadata: Optional[Any], n_samples: int) -> Optional[pd.DataFrame]:
-    if metadata is None:
-        return None
-    if isinstance(metadata, pd.DataFrame):
-        df = metadata.copy()
-    else:
-        df = pd.DataFrame(metadata)
-    if len(df) != n_samples:
-        raise ValueError(
-            f"Metadata length ({len(df)}) does not match number of samples ({n_samples})."
-        )
-    return df.reset_index(drop=True)
-
-
-def tune_threshold_from_config(
-    y_true: Iterable[int],
-    y_prob: Iterable[float],
-    config,
-) -> Optional[Dict[str, float]]:
-    eval_cfg = getattr(config, "evaluation", None)
-    if eval_cfg is None or getattr(eval_cfg, "threshold_tuning", None) is None:
-        return None
-
-    thr_cfg = eval_cfg.threshold_tuning
-    grid = getattr(thr_cfg, "grid", None)
-    grid = grid if grid else None
-    optimize_for = getattr(thr_cfg, "optimize_for", "f1_pos")
-
-    return find_best_threshold(y_true, y_prob, optimize_for=optimize_for, grid=grid)
-
-
-def evaluate_predictions(
-    y_true: Iterable[int],
-    y_prob: Iterable[float],
-    config,
+def train_and_eval_baselines(
+    X_train,
+    y_train,
+    X_val,
+    y_val,
+    X_test,
+    y_test,
     *,
-    split: str = "val",
-    metadata: Optional[Any] = None,
-    apply_config_calibration: bool = False,
-    tune_threshold: bool = False,
-    existing_threshold: Optional[float] = None,
-) -> EvaluationResult:
-    """Evaluate predictions according to the configuration settings."""
-
-    eval_cfg = getattr(config, "evaluation", None)
-    if eval_cfg is None:
-        raise ValueError("Configuration is missing the 'evaluation' section.")
-
-    probs = np.asarray(y_prob, dtype=float)
-    labels = np.asarray(y_true)
-
-    calibration_model = None
-    if apply_config_calibration:
-        calibration_model = fit_calibrator_from_config(labels, probs, config)
-        probs = np.asarray(apply_calibration(calibration_model, probs))
-
-    threshold_info: Optional[Dict[str, float]] = None
-    threshold_value: float = existing_threshold if existing_threshold is not None else 0.5
-    if tune_threshold:
-        threshold_info = tune_threshold_from_config(labels, probs, config)
-        if threshold_info is not None:
-            threshold_value = float(threshold_info["threshold"])
-
-    metrics_all = compute_metrics(labels, probs, threshold=threshold_value)
-    metrics_primary = _select_metrics(metrics_all, getattr(eval_cfg, "metrics_primary", []))
-    metrics_secondary = _select_metrics(
-        metrics_all, getattr(eval_cfg, "metrics_secondary", [])
+    config=None,
+    val_metadata=None,
+    test_metadata=None,
+):
+    """Train multiple baseline ML models and evaluate on validation and test sets."""
+    xgb_params = dict(
+        random_state=42,
+        eval_metric='logloss',
+        n_estimators=1000,          # large cap + early stopping
+        learning_rate=0.05,
+        max_depth=6,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        reg_lambda=1.0,
+        n_jobs=-1,
+        verbosity=0
     )
 
-    subgroup_results: Optional[Dict[str, Dict[Any, Dict[str, float]]]] = None
-    df_meta = _prepare_metadata(metadata, len(labels))
-    subgroup_cols = getattr(eval_cfg, "subgroup_metrics", [])
-    if df_meta is not None and subgroup_cols:
-        subgroup_results = {}
-        for col in subgroup_cols:
-            if col not in df_meta.columns:
-                raise KeyError(f"Metadata is missing subgroup column '{col}'.")
-            subgroup_results[col] = {}
-            for value, idxs in df_meta.groupby(col).groups.items():
-                mask = df_meta.index.isin(idxs)
-                subgroup_metrics = compute_metrics(
-                    labels[mask], probs[mask], threshold=threshold_value
+    lgbm_params = dict(
+        random_state=42,
+        n_estimators=1000,          # large cap + early stopping
+        learning_rate=0.03,
+        num_leaves=120,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        n_jobs=-1
+    )
+    results = {}
+    models = {
+        "LogisticRegression": LogisticRegression(max_iter=1000),
+        "RandomForest": RandomForestClassifier(n_estimators=100, random_state=42),
+        "XGBoost": XGBClassifier(**xgb_params),
+        #"LightGBM": LGBMClassifier(**lgbm_params),
+        "SVM": SVC(kernel="rbf", probability=True, random_state=42),
+        "KNN": KNeighborsClassifier(n_neighbors=5),
+    }
+
+    for name, model in tqdm(models.items(), desc="Training Baselines", dynamic_ncols=True):
+        model.fit(X_train, y_train)
+
+        val_output: Dict[str, EvaluationResult | Dict[str, float]]
+        if X_val is not None and y_val is not None:
+            val_prob = _predict_proba_or_score(model, X_val)
+            if config is not None:
+                val_eval = evaluate_predictions(
+                    y_val,
+                    val_prob,
+                    config,
+                    split="val",
+                    metadata=val_metadata,
+                    tune_threshold=True,
+                    apply_config_calibration=True,
                 )
-                subgroup_results[col][value] = subgroup_metrics
+                val_output = val_eval
+                threshold_to_use = val_eval.threshold
+                calibrator = val_eval.calibration_model
+            else:
+                val_output = compute_metrics(y_val, val_prob)
+                threshold_to_use = 0.5
+                calibrator = None
+        else:
+            val_output = {}
+            threshold_to_use = 0.5
+            calibrator = None
 
-    return EvaluationResult(
-        split=split,
-        threshold=threshold_value,
-        metrics_primary=metrics_primary,
-        metrics_secondary=metrics_secondary,
-        metrics_all=metrics_all,
-        threshold_tuning=threshold_info,
-        calibration_model=calibration_model,
-        subgroup_metrics=subgroup_results,
-    )
+        test_prob = _predict_proba_or_score(model, X_test)
+        if config is not None:
+            test_eval = evaluate_predictions(
+                y_test,
+                test_prob,
+                config,
+                split="test",
+                metadata=test_metadata,
+                apply_config_calibration=calibrator is not None,
+                existing_threshold=threshold_to_use,
+            )
+            # Reuse fitted calibrator if available
+            if calibrator is not None and test_eval.calibration_model is None:
+                test_eval.calibration_model = calibrator
+        else:
+            test_eval = compute_metrics(y_test, test_prob)
+
+        results[name] = {
+            "val": val_output,
+            "test": test_eval,
+        }
+
+    return results
