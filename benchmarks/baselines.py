@@ -2,12 +2,15 @@ import numpy as np
 from typing import Dict
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
-from sklearn.svm import SVC
+from sklearn.svm import SVC, LinearSVC
 from sklearn.neighbors import KNeighborsClassifier
 from train.evaluation import EvaluationResult, evaluate_predictions
 from train.metrics import compute_metrics
+from tqdm.auto import tqdm
 
 
 def _predict_proba_or_score(model, X):
@@ -35,17 +38,55 @@ def train_and_eval_baselines(
 
     results = {}
     models = {
-        "LogisticRegression": LogisticRegression(max_iter=1000),
-        "RandomForest": RandomForestClassifier(n_estimators=100, random_state=42),
-        "XGBoost": XGBClassifier(use_label_encoder=False, eval_metric="logloss", random_state=42),
-        "LightGBM": LGBMClassifier(random_state=42),
-        "SVM": SVC(kernel="rbf", probability=True, random_state=42),
-        "KNN": KNeighborsClassifier(n_neighbors=5),
+        # Fast, strong baseline; scaling helps most linear models
+        "LogisticRegression": make_pipeline(
+            StandardScaler(),
+            LogisticRegression(
+                solver="lbfgs",  # robust for dense ~60 features
+                max_iter=300,  # lighter than 1000
+                class_weight="balanced",
+                n_jobs=None  # (only used by some solvers; lbfgs ignores)
+            )
+        ),
+
+        # Much lighter trees: shallower + fewer leaves
+        "RandomForest": RandomForestClassifier(
+            n_estimators=500,  # keep modest
+            max_depth=12,  # cap tree depth
+            min_samples_leaf=5,  # coarser leaves
+            max_features="sqrt",  # standard for classification
+            class_weight="balanced_subsample",
+            n_jobs=-1,
+            random_state=42
+        ),
+
+        # Histogram-based GBM + early stopping in fit()
+        "XGBoost": XGBClassifier(
+            tree_method="hist",  # fast on tabular
+            max_depth=12,  # shallow trees
+            learning_rate=0.1,  # pair with early stopping
+            n_estimators=1000,  # large cap; will stop early
+            subsample=0.8,
+            colsample_bytree=0.8,
+            reg_lambda=1.0,
+            eval_metric="aucpr",
+            n_jobs=-1,
+            random_state=42,
+        ),
+        # Optional: KNN is heavy to predict on 100k; keep only if you really want it.
+        "KNN": make_pipeline(
+            StandardScaler(),
+            KNeighborsClassifier(
+                n_neighbors=11,
+                weights="distance",
+                algorithm="ball_tree",  # faster than brute in moderate dims
+                leaf_size=50,
+                n_jobs=-1
+            )
+        ),
     }
-
-    for name, model in models.items():
+    for name, model in tqdm(list(models.items()), desc="Training (light) baselines", unit="model"):
         model.fit(X_train, y_train)
-
         val_output: Dict[str, EvaluationResult | Dict[str, float]]
         if X_val is not None and y_val is not None:
             val_prob = _predict_proba_or_score(model, X_val)
