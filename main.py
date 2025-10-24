@@ -304,6 +304,25 @@ df_train, df_val, df_test, scaler = preprocess.preprocess_data(df_train, df_val,
 logger.info("Preprocessing complete. Sample of processed features:")
 logger.info(df_train[config.data.columns.numeric + config.data.columns.categorical_low_card].head(3))
 #%%
+RUN_DATA_EXPLORATION = False
+
+if RUN_DATA_EXPLORATION:
+    from evaluation.data_exploration import DataExplorer
+    try:
+        from IPython.display import display
+    except Exception:  # pragma: no cover - fallback for non-IPython envs
+        def display(obj):  # type: ignore[redefinition]
+            print(obj)
+
+    explorer = DataExplorer(df_train, target_column=config.data.target.binarized_name)
+    data_summary = explorer.summary_table()
+    class_balance_fig = explorer.class_balance_plot()
+    violin_fig = explorer.violin_plot()
+
+    display(data_summary.head())
+    class_balance_fig.show()
+    violin_fig.show()
+#%%
 from data import vocab
 
 vocabs, mappings = vocab.make_vocabs(df_train, config)
@@ -400,6 +419,41 @@ train_loader = make_neighbor_loader(
 )
 
 val_data = graph_val.to(device)
+#%%
+RUN_GNN_GRID_SEARCH = False
+
+if RUN_GNN_GRID_SEARCH:
+    from grid_search.gnn import GridSearchGNN
+    try:
+        from IPython.display import display
+    except Exception:  # pragma: no cover
+        def display(obj):  # type: ignore[redefinition]
+            print(obj)
+
+    grid_search = GridSearchGNN(
+        ModelClass,
+        base_config=config,
+        model_kwargs={
+            "metadata": metadata,
+            "enc_input_dim": enc_input_dim,
+            "type_vocab_sizes": type_vocab_sizes,
+            "device": device,
+        },
+        train_kwargs={
+            "epochs": 5,
+            "use_trainer": True,
+            "runtime": rt,
+            "trainer_kwargs": {
+                "early_stopping_patience": int(getattr(config.train, "early_stopping_patience", 5)),
+                "val_every": int(getattr(config.train, "val_every", 1)),
+            },
+        },
+        metric_name="auprc",
+    )
+
+    gnn_grid_report = grid_search.run(train_loader, val_data=val_data, device=device)
+    display(gnn_grid_report.results.head())
+    logger.info(f"Best grid search params: {gnn_grid_report.best_params} -> {gnn_grid_report.best_score:.4f}")
 
 # --- Trainer instance ---
 trainer = Trainer(
@@ -511,6 +565,25 @@ logger.info("Test metrics after calibration: " + ", ".join(f"{k}={v:.4f}" for k,
 #%%
 best_thr, metric_name, best_f1
 #%%
+RUN_MODEL_EVALUATOR = False
+
+if RUN_MODEL_EVALUATOR:
+    from evaluation.model_evaluator import Evaluator
+    try:
+        from IPython.display import display
+    except Exception:  # pragma: no cover
+        def display(obj):  # type: ignore[redefinition]
+            print(obj)
+
+    test_data = [graph_test]
+    test_labels_np = graph_test["encounter"].y.cpu().numpy()
+
+    evaluator = Evaluator({"gnn_model": model})
+    evaluator.evaluate(test_data, test_labels_np)
+
+    display(evaluator.metrics_summary_table())
+    display(evaluator.threshold_metrics_table())
+#%%
 import matplotlib.pyplot as plt
 from sklearn.metrics import RocCurveDisplay, PrecisionRecallDisplay, ConfusionMatrixDisplay, confusion_matrix
 from sklearn.calibration import CalibrationDisplay
@@ -568,6 +641,37 @@ X_val_tab = df_val[feature_cols].to_numpy()
 y_val_tab = df_val[config.data.target.binarized_name].to_numpy()
 X_test_tab = df_test[feature_cols].to_numpy()
 y_test_tab = df_test[config.data.target.binarized_name].to_numpy()
+#%%
+RUN_STABILITY_STUDY = False
+
+if RUN_STABILITY_STUDY:
+    from sklearn.linear_model import LogisticRegression
+    from evaluation.model_evaluator import RepeatedTrainingStudy
+    try:
+        from IPython.display import display
+    except Exception:  # pragma: no cover
+        def display(obj):  # type: ignore[redefinition]
+            print(obj)
+
+    def make_log_reg() -> LogisticRegression:
+        return LogisticRegression(max_iter=500, solver="lbfgs")
+
+    stability = RepeatedTrainingStudy(
+        make_log_reg,
+        metric_names=["auroc", "auprc", "f1_pos", "precision_pos", "recall_pos"],
+    )
+
+    runs_df, summary_df = stability.run(
+        X_train_tab,
+        y_train_tab,
+        X_test_tab,
+        y_test_tab,
+        n_runs=5,
+        random_state=42,
+    )
+
+    display(runs_df)
+    display(summary_df)
 
 print("Starting")
 # Train and evaluate baseline models

@@ -2,6 +2,8 @@ import torch
 from torch import nn
 from torch_geometric.nn import SAGEConv, to_hetero
 
+from models.wrapper import GridParam, SklearnLikeGNN
+
 
 def _make_act(name: str) -> nn.Module:
     name = (name or "relu").lower()
@@ -13,14 +15,20 @@ def _make_act(name: str) -> nn.Module:
     return nn.ReLU()
 
 
-class GraphSAGEModel(nn.Module):
-    def __init__(self, metadata, config, enc_input_dim: int, type_vocab_sizes: dict):
+class GraphSAGEModel(SklearnLikeGNN):
+    def __init__(self, metadata, config, enc_input_dim: int, type_vocab_sizes: dict, device=None):
         """
         metadata: (node_types, edge_types)
         enc_input_dim: float-feature dim for 'encounter'
         type_vocab_sizes: {node_type: num_nodes} for index-based nodes (Embedding path)
         """
-        super().__init__()
+        super().__init__(
+            metadata=metadata,
+            config=config,
+            enc_input_dim=enc_input_dim,
+            type_vocab_sizes=type_vocab_sizes,
+            device=device,
+        )
         self.hidden = hidden = int(config.model.hidden_dim)
         node_types, edge_types = metadata
 
@@ -84,6 +92,9 @@ class GraphSAGEModel(nn.Module):
         # ---------- 3) Classifier over encounter nodes ----------
         self.classifier = nn.Linear(hidden, 1)
 
+        if device is not None:
+            self.to(device)
+
     def _encode_inputs(self, x_dict):
         """Apply the right encoder (Embedding or Linear) to each type."""
         h = {}
@@ -107,3 +118,24 @@ class GraphSAGEModel(nn.Module):
         out_dict = self.gnn(h_dict, edge_index_dict)  # hetero SAGE
         enc_out = out_dict["encounter"]           # [B_enc, hidden]
         return self.classifier(enc_out).view(-1)  # [B_enc]
+
+    @classmethod
+    def suggested_grid(cls):
+        return {
+            "model.hidden_dim": GridParam(
+                values=[128, 192, 256, 320],
+                description="Hidden channels for GraphSAGE layers.",
+            ),
+            "model.num_layers": GridParam(
+                values=[2, 3, 4],
+                description="Number of message passing layers.",
+            ),
+            "model.dropout": GridParam(
+                values=[0.0, 0.1, 0.25],
+                description="Dropout before GraphSAGE layers.",
+            ),
+            "model.act": GridParam(
+                values=["relu", "gelu", "silu"],
+                description="Activation function used inside GraphSAGE layers.",
+            ),
+        }

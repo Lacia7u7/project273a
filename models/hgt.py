@@ -4,9 +4,11 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from torch_geometric.nn import HGTConv
-from models.heads import TypewiseInputProjector, EncounterClassifier
 
-class HGTModel(nn.Module):
+from models.heads import TypewiseInputProjector, EncounterClassifier
+from models.wrapper import GridParam, SklearnLikeGNN
+
+class HGTModel(SklearnLikeGNN):
     """
     HGT with:
       - global, eager input projector sizing (no batch-based sizing)
@@ -22,7 +24,13 @@ class HGTModel(nn.Module):
         type_vocab_sizes: dict,        # {ntype: graph_train[ntype].num_nodes} for non-encounter
         device: torch.device | None = None,
     ):
-        super().__init__()
+        super().__init__(
+            metadata=metadata,
+            config=config,
+            enc_input_dim=enc_input_dim,
+            type_vocab_sizes=type_vocab_sizes,
+            device=device,
+        )
         self.hidden_dim = int(config.model.hidden_dim)
 
         # -------- Input Projector (GLOBAL sizes) --------
@@ -59,7 +67,28 @@ class HGTModel(nn.Module):
 
         # -------- Move entire model to device (AFTER creating all submodules) --------
         if device is not None:
-            super().to(device)
+            self.to(device)
+
+    @classmethod
+    def suggested_grid(cls):
+        return {
+            "model.hidden_dim": GridParam(
+                values=[128, 192, 256, 320],
+                description="Hidden representation size for all node types.",
+            ),
+            "model.num_layers": GridParam(
+                values=[2, 3, 4],
+                description="Number of stacked HGT convolution layers.",
+            ),
+            "model.heads": GridParam(
+                values=[2, 4, 6],
+                description="Number of attention heads per HGT layer.",
+            ),
+            "model.dropout": GridParam(
+                values=[0.0, 0.1, 0.25],
+                description="Dropout applied to input projections and classifier.",
+            ),
+        }
 
     def forward(self, x_dict, edge_index_dict):
         x_dict = self.proj(x_dict)

@@ -2,9 +2,11 @@
 import torch
 from torch import nn
 from torch_geometric.nn import RGCNConv
-from models.heads import TypewiseInputProjector, EncounterClassifier
 
-class RGCNModel(nn.Module):
+from models.heads import TypewiseInputProjector, EncounterClassifier
+from models.wrapper import GridParam, SklearnLikeGNN
+
+class RGCNModel(SklearnLikeGNN):
     """
     Relational-GCN over a heterogeneous mini-batch.
     Constructor matches your factory: (metadata, config, enc_input_dim=None, type_vocab_sizes=None, **kwargs)
@@ -14,8 +16,15 @@ class RGCNModel(nn.Module):
                  config,
                  enc_input_dim=None,
                  type_vocab_sizes=None,
+                 device=None,
                  **kwargs):
-        super().__init__()
+        super().__init__(
+            metadata=metadata,
+            config=config,
+            enc_input_dim=enc_input_dim,
+            type_vocab_sizes=type_vocab_sizes,
+            device=device,
+        )
         node_types, edge_types = metadata
         self.node_types = list(node_types)
         self.relation_index = {edge_type: i for i, edge_type in enumerate(edge_types)}
@@ -56,6 +65,9 @@ class RGCNModel(nn.Module):
         self.act = nn.ReLU()
         self.drop = nn.Dropout(self.dropout_p)
         self.classifier = EncounterClassifier(self.hidden_dim)
+
+        if device is not None:
+            self.to(device)
 
     @torch.no_grad()
     def _build_projector_if_needed(self, x_dict):
@@ -135,3 +147,24 @@ class RGCNModel(nn.Module):
 
         logits = self.classifier(enc_h).view(-1)
         return logits
+
+    @classmethod
+    def suggested_grid(cls):
+        return {
+            "model.hidden_dim": GridParam(
+                values=[128, 192, 256],
+                description="Dimensionality of node embeddings across RGCN layers.",
+            ),
+            "model.num_layers": GridParam(
+                values=[2, 3, 4],
+                description="Depth of the RGCN stack.",
+            ),
+            "model.dropout": GridParam(
+                values=[0.0, 0.1, 0.2],
+                description="Dropout applied after each RGCN layer.",
+            ),
+            "model.rgcn_bases": GridParam(
+                values=[-1, 0, 16],
+                description="Number of basis decomposition components (<=0 disables).",
+            ),
+        }
