@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from minepy import MINE
+import phik
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.feature_selection import mutual_info_classif
@@ -155,18 +155,49 @@ class DataExplorer:
         return pd.DataFrame({"feature": df_feat.columns, "mutual_information": mi}).sort_values("mutual_information", ascending=False)
 
     def mic_table(self, columns: Optional[Sequence[str]] = None) -> pd.DataFrame:
+        """
+        Replacement for minepy MIC using PhiK.
+        - Returns columns ['feature', 'mic', 'mas', 'tic'] for compatibility:
+            * 'mic' contains PhiK values in [0, 1]
+            * 'mas' and 'tic' are NaN (not provided by PhiK)
+        """
         cols = self._subset(columns)
         if not cols:
             return pd.DataFrame(columns=["feature", "mic", "mas", "tic"])
-        mine = MINE()
-        y = pd.factorize(self.sample[self.target_column])[0]
-        scores: List[Dict[str, float]] = []
-        for col in cols:
-            x = self.sample[col].values
-            mask = ~pd.isna(x)
-            mine.compute_score(x[mask], y[mask])
-            scores.append({"feature": col, "mic": mine.mic(), "mas": mine.mas(), "tic": mine.tic()})
-        return pd.DataFrame(scores).sort_values("mic", ascending=False)
+
+        # Build a working frame with selected features + target
+        df = self.sample[cols + [self.target_column]].copy()
+
+        # Ensure categorical columns are proper objects; keep numeric as-is
+        for c in cols:
+            if pd.api.types.is_numeric_dtype(df[c]):
+                # leave as float; PhiK handles continuous via interval estimation
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+            else:
+                df[c] = df[c].astype("object").fillna("Missing")
+
+        # Encode target as categorical codes to keep it discrete
+        # (If your target is already categorical/strings this is fine.)
+        tgt_codes, _ = pd.factorize(df[self.target_column])
+        df["_target_"] = tgt_codes
+
+        # Which features should be treated as interval (continuous)?
+        interval_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])]
+
+        # Compute PhiK correlation matrix; needs the phik pandas accessor
+        phik_matrix = df[[*cols, "_target_"]].phik_matrix(interval_cols=interval_cols)
+
+        # Extract association of each feature with the target
+        s = phik_matrix.loc[cols, "_target_"].sort_values(ascending=False)
+
+        out = pd.DataFrame({
+            "feature": s.index,
+            "mic": s.values,  # PhiK score in [0, 1]
+            "mas": np.nan,  # not available from PhiK
+            "tic": np.nan  # not available from PhiK
+        })
+
+        return out
 
     # ------------------------------------------------------------------
     # PCA & clustering

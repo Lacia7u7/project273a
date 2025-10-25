@@ -25,8 +25,10 @@ pyarrow>=8.0
 rich>=12.0
 plotly>=5.0
 dcor>=0.5
-minepy>=1.2.6
+phik>=0.12
 
 # Configs/validation (you’re on Pydantic v1 APIs)
 pydantic>=1.9,<2
 pyg-lib
+tqdm-joblib
+catboost
