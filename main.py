@@ -38,7 +38,7 @@ if 'google.colab' in sys.modules:
     sys.path.append('/content/project273a')
 #%%
 %load_ext autoreload
-%autoreload 1
+%autoreload 2
 #%%
 # Imports for utilities
 import os
@@ -260,10 +260,11 @@ logger, writer = init_logging(config.path.logs_dir)
 logger.info("Configuration and logging initialized.")
 #%%
 from data.filters import apply_filters
+from utils.io import load_csv
 import data
 
 # Load the datasets
-df = utils.io.load_csv(config.data.csv_path)
+df = load_csv(config.data.csv_path)
 df = apply_filters(df, config)
 
 logger.info(f"Raw data shape: {df.shape}")
@@ -304,24 +305,21 @@ df_train, df_val, df_test, scaler = preprocess.preprocess_data(df_train, df_val,
 logger.info("Preprocessing complete. Sample of processed features:")
 logger.info(df_train[config.data.columns.numeric + config.data.columns.categorical_low_card].head(3))
 #%%
-RUN_DATA_EXPLORATION = False
+from evaluation.data_exploration import DataExplorer
+try:
+    from IPython.display import display
+except Exception:  # pragma: no cover - fallback for non-IPython envs
+    def display(obj):  # type: ignore[redefinition]
+        print(obj)
 
-if RUN_DATA_EXPLORATION:
-    from evaluation.data_exploration import DataExplorer
-    try:
-        from IPython.display import display
-    except Exception:  # pragma: no cover - fallback for non-IPython envs
-        def display(obj):  # type: ignore[redefinition]
-            print(obj)
+explorer = DataExplorer(df_train, target_column=config.data.target.binarized_name)
+data_summary = explorer.summary_table()
+class_balance_fig = explorer.class_balance_plot()
+violin_fig = explorer.violin_plot()
 
-    explorer = DataExplorer(df_train, target_column=config.data.target.binarized_name)
-    data_summary = explorer.summary_table()
-    class_balance_fig = explorer.class_balance_plot()
-    violin_fig = explorer.violin_plot()
-
-    display(data_summary.head())
-    class_balance_fig.show()
-    violin_fig.show()
+display(data_summary.head())
+class_balance_fig.show()
+violin_fig.show()
 #%%
 from data import vocab
 
@@ -419,41 +417,6 @@ train_loader = make_neighbor_loader(
 )
 
 val_data = graph_val.to(device)
-#%%
-RUN_GNN_GRID_SEARCH = False
-
-if RUN_GNN_GRID_SEARCH:
-    from grid_search.gnn import GridSearchGNN
-    try:
-        from IPython.display import display
-    except Exception:  # pragma: no cover
-        def display(obj):  # type: ignore[redefinition]
-            print(obj)
-
-    grid_search = GridSearchGNN(
-        ModelClass,
-        base_config=config,
-        model_kwargs={
-            "metadata": metadata,
-            "enc_input_dim": enc_input_dim,
-            "type_vocab_sizes": type_vocab_sizes,
-            "device": device,
-        },
-        train_kwargs={
-            "epochs": 5,
-            "use_trainer": True,
-            "runtime": rt,
-            "trainer_kwargs": {
-                "early_stopping_patience": int(getattr(config.train, "early_stopping_patience", 5)),
-                "val_every": int(getattr(config.train, "val_every", 1)),
-            },
-        },
-        metric_name="auprc",
-    )
-
-    gnn_grid_report = grid_search.run(train_loader, val_data=val_data, device=device)
-    display(gnn_grid_report.results.head())
-    logger.info(f"Best grid search params: {gnn_grid_report.best_params} -> {gnn_grid_report.best_score:.4f}")
 
 # --- Trainer instance ---
 trainer = Trainer(
@@ -476,9 +439,7 @@ val_every = trainer.val_every
 grad_clip = getattr(config.train, "gradient_clip_norm", None)
 
 epoch_bar = trange(1, epochs + 1, desc="Epochs", dynamic_ncols=True, leave=True)
-
 #%%
-
 for epoch in epoch_bar:
     # per-epoch inner bar
     batch_bar = tqdm(train_loader, desc=f"Train Epoch {epoch}", dynamic_ncols=True, leave=False)
@@ -510,6 +471,189 @@ best_state = trainer.load_best()
 #%%
 artifact_path = save_best_artifact(best_state, config, artifacts_dir="artifacts")
 logger.info(f"Saved best artifact to: {artifact_path}")
+#%%
+"""
+Fast grid search for `RGCNModel`
+
+This script demonstrates how to launch the parallel grid search helper
+introduced in `grid_search/rgcn_fast.py`. It mirrors a multi-process,
+MPS-friendly loop and uses the repository's `RGCNModel` wrapper.
+"""
+
+import os
+import subprocess
+from types import SimpleNamespace
+
+# ---------------------------------------------------------------------
+# Optional: NVIDIA CUDA MPS setup (safe to keep on CPU; will no-op there)
+# ---------------------------------------------------------------------
+os.environ["CUDA_MPS_PIPE_DIRECTORY"] = "/tmp/nvidia-mps"
+os.environ["CUDA_MPS_LOG_DIRECTORY"] = "/tmp/nvidia-mps"
+
+try:
+    subprocess.run(
+        ["nvidia-cuda-mps-control", "-d"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+except FileNotFoundError:
+    print("MPS control binary not found; continuing without it.")
+
+# ---------------------------------------------------------------------
+# Imports from repo + PyTorch Geometric
+# ---------------------------------------------------------------------
+from grid_search.rgcn_fast import FastGridSearchConfig, run_fast_rgcn_grid_search
+
+try:
+    import torch
+    from torch_geometric.data import HeteroData
+    from torch_geometric.loader import DataLoader as PYGDataLoader
+except ImportError as exc:
+    raise RuntimeError("Install torch and torch-geometric to run this script.") from exc
+
+TOY_DATASET_SIZE = 8
+
+
+def build_toy_graph(
+    num_encounters: int = 128,
+    num_diagnoses: int = 32,
+    input_dim: int = 16,
+    seed: int = 0,
+) -> HeteroData:
+    """Construct a tiny heterogenous encounter–diagnosis graph."""
+    torch.manual_seed(seed)
+
+    data = HeteroData()
+
+    # Encounter node features + labels
+    data["encounter"].x = torch.randn(num_encounters, input_dim)
+    data["encounter"].y = torch.randint(0, 2, (num_encounters,), dtype=torch.float32)
+
+    # Diagnosis nodes
+    data["diagnosis"].x = torch.arange(num_diagnoses)
+    data["diagnosis"].num_nodes = num_diagnoses
+
+    # Edges: encounter -> diagnosis and reverse
+    src = torch.arange(num_encounters).repeat_interleave(3)
+    dst = torch.randint(0, num_diagnoses, (src.numel(),))
+    data[("encounter", "has", "diagnosis")].edge_index = torch.stack([src, dst])
+    data[("diagnosis", "rev_has", "encounter")].edge_index = torch.stack([dst, src])
+
+    return data
+
+
+# Metadata for the RGCNModel
+toy_metadata = build_toy_graph().metadata()
+
+
+def toy_data_factory(current_config):
+    """
+    Factory that builds train/val/test loaders given a config.
+
+    It reads `train.batching.batch_size_encounters` from the current_config
+    and uses a small synthetic dataset of toy graphs.
+    """
+    batch_cfg = getattr(
+        getattr(current_config.train, "batching", SimpleNamespace(batch_size_encounters=1)),
+        "batch_size_encounters",
+        1,
+    )
+
+    dataset = [build_toy_graph(seed=seed) for seed in range(TOY_DATASET_SIZE)]
+    loader = PYGDataLoader(dataset, batch_size=min(int(batch_cfg), len(dataset)))
+    return loader, loader, loader
+
+
+# Base configuration namespace used as a template for the grid search
+base_config = SimpleNamespace(
+    model=SimpleNamespace(
+        hidden_dim=64,
+        num_layers=2,
+        dropout=0.1,
+        rgcn_bases=0,
+    ),
+    train=SimpleNamespace(
+        epochs=10,
+        optimizer=SimpleNamespace(
+            name="Adam",
+            lr=1e-3,
+            weight_decay=0.0,
+        ),
+        batching=SimpleNamespace(batch_size_encounters=4),
+    ),
+)
+
+# ---------------------------------------------------------------------
+# Grid search definition
+# ---------------------------------------------------------------------
+param_grid = {
+    "model.hidden_dim": [32, 64],
+    "model.num_layers": [2, 3],
+    "train.optimizer.lr": [1e-3, 5e-4],
+    "train.optimizer.weight_decay": [0.0, 1e-4],
+    "train.epochs": [5],
+}
+
+search_config = FastGridSearchConfig(
+    metadata=toy_metadata,
+    base_config=base_config,
+    data_factory=toy_data_factory,
+    param_grid=param_grid,
+    n_jobs=2,
+    device="cpu",  # use "cuda:0" when GPUs are available
+    start_cuda_mps=False,
+    metric_name="val_auprc",
+)
+
+#%%
+
+report = run_fast_rgcn_grid_search(search_config)
+
+# Show top rows of results DataFrame (if you are inside a notebook,
+# you might call `report.results.head()` directly)
+print(report.results.head())
+
+# Print best hyperparameters and score
+print("Best params:", report.best_params)
+print("Best score:", report.best_score)
+
+# Evaluate best model on a fresh toy validation loader
+_, val_loader, _ = toy_data_factory(base_config)
+best_metrics = report.best_model.evaluate_loader(val_loader, device=search_config.device)
+print("Best model metrics on toy val loader:", best_metrics)
+#%%
+from grid_search.gnn import GridSearchGNN
+try:
+    from IPython.display import display
+except Exception:  # pragma: no cover
+    def display(obj):  # type: ignore[redefinition]
+        print(obj)
+
+grid_search = GridSearchGNN(
+    ModelClass,
+    base_config=config,
+    model_kwargs={
+            "metadata": metadata,
+            "enc_input_dim": enc_input_dim,
+            "type_vocab_sizes": type_vocab_sizes,
+            "device": device,
+    },
+    train_kwargs={
+            "epochs": 5,
+            "use_trainer": True,
+            "runtime": rt,
+            "trainer_kwargs": {
+                "early_stopping_patience": int(getattr(config.train, "early_stopping_patience", 5)),
+                "val_every": int(getattr(config.train, "val_every", 1)),
+            },
+    },
+    metric_name="auprc",
+)
+
+gnn_grid_report = grid_search.run(train_loader, val_data=val_data, device=device)
+display(gnn_grid_report.results.head())
+logger.info(f"Best grid search params: {gnn_grid_report.best_params} -> {gnn_grid_report.best_score:.4f}")
 #%%
 from utils.artifacts import load_best_artifact
 
@@ -565,24 +709,21 @@ logger.info("Test metrics after calibration: " + ", ".join(f"{k}={v:.4f}" for k,
 #%%
 best_thr, metric_name, best_f1
 #%%
-RUN_MODEL_EVALUATOR = False
+from evaluation.model_evaluator import Evaluator
+try:
+    from IPython.display import display
+except Exception:  # pragma: no cover
+    def display(obj):  # type: ignore[redefinition]
+        print(obj)
 
-if RUN_MODEL_EVALUATOR:
-    from evaluation.model_evaluator import Evaluator
-    try:
-        from IPython.display import display
-    except Exception:  # pragma: no cover
-        def display(obj):  # type: ignore[redefinition]
-            print(obj)
+test_data = [graph_test]
+test_labels_np = graph_test["encounter"].y.cpu().numpy()
 
-    test_data = [graph_test]
-    test_labels_np = graph_test["encounter"].y.cpu().numpy()
+evaluator = Evaluator({"gnn_model": model})
+evaluator.evaluate(test_data, test_labels_np)
 
-    evaluator = Evaluator({"gnn_model": model})
-    evaluator.evaluate(test_data, test_labels_np)
-
-    display(evaluator.metrics_summary_table())
-    display(evaluator.threshold_metrics_table())
+display(evaluator.metrics_summary_table())
+display(evaluator.threshold_metrics_table())
 #%%
 import matplotlib.pyplot as plt
 from sklearn.metrics import RocCurveDisplay, PrecisionRecallDisplay, ConfusionMatrixDisplay, confusion_matrix
@@ -642,37 +783,6 @@ y_val_tab = df_val[config.data.target.binarized_name].to_numpy()
 X_test_tab = df_test[feature_cols].to_numpy()
 y_test_tab = df_test[config.data.target.binarized_name].to_numpy()
 #%%
-RUN_STABILITY_STUDY = False
-
-if RUN_STABILITY_STUDY:
-    from sklearn.linear_model import LogisticRegression
-    from evaluation.model_evaluator import RepeatedTrainingStudy
-    try:
-        from IPython.display import display
-    except Exception:  # pragma: no cover
-        def display(obj):  # type: ignore[redefinition]
-            print(obj)
-
-    def make_log_reg() -> LogisticRegression:
-        return LogisticRegression(max_iter=500, solver="lbfgs")
-
-    stability = RepeatedTrainingStudy(
-        make_log_reg,
-        metric_names=["auroc", "auprc", "f1_pos", "precision_pos", "recall_pos"],
-    )
-
-    runs_df, summary_df = stability.run(
-        X_train_tab,
-        y_train_tab,
-        X_test_tab,
-        y_test_tab,
-        n_runs=5,
-        random_state=42,
-    )
-
-    display(runs_df)
-    display(summary_df)
-
 print("Starting")
 # Train and evaluate baseline models
 baseline_results = train_and_eval_baselines(X_train_tab, y_train_tab, X_val_tab, y_val_tab, X_test_tab, y_test_tab, config=config)
@@ -680,4 +790,101 @@ print("Finishing")
 # Display baseline evaluation results
 for model_name, metrics_dict in baseline_results.items():
     test_met = metrics_dict["test"]
+#%%
+from grid_search.tabular import BaselineGridSearch
+
+try:
+    from IPython.display import display
+except Exception:  # pragma: no cover
+    def display(obj):  # type: ignore[redefinition]
+        print(obj)
+
+tabular_grid = BaselineGridSearch()
+tabular_report = tabular_grid.run(
+    X_train_tab,
+    y_train_tab,
+    X_val=X_val_tab,
+    y_val=y_val_tab,
+    sample_size=45000,
+    max_configs_per_model=30
+)
+
+display(tabular_report.results)
+print(
+    "Best tabular baseline:",
+    tabular_report.best_params,
+    f"score={tabular_report.best_score:.4f}",
+)
+
+best_tab_metrics = tabular_grid._evaluate(  # pylint: disable=protected-access
+    tabular_report.best_model,
+    X_test_tab,
+    y_test_tab,
+)
+print("Best model test metrics:")
+for metric_name, metric_value in best_tab_metrics.items():
+    print(f"  {metric_name}: {metric_value:.4f}")
+
+import plotly.express as px
+
+score_fig = px.bar(
+    tabular_report.results,
+    x="model",
+    y="score",
+    color="model",
+    title="Tabular Baseline Grid Search Scores",
+    hover_data=[
+        column
+        for column in tabular_report.results.columns
+        if column not in {"model", "score"}
+    ],
+)
+score_fig.show()
+
+if {"score", "model"}.issubset(tabular_report.results.columns):
+    ranked_results = tabular_report.results.copy()
+    ranked_results["rank"] = ranked_results.index + 1
+    rank_fig = px.scatter(
+        ranked_results,
+        x="rank",
+        y="score",
+        color="model",
+        title="Score by Rank for Tabular Baselines",
+        hover_data=[
+            column
+            for column in ranked_results.columns
+            if column not in {"rank", "score"}
+        ],
+    )
+    rank_fig.show()
+#%%
+tabular_report.results
+#%%
+from sklearn.linear_model import LogisticRegression
+from evaluation.model_evaluator import RepeatedTrainingStudy
+try:
+    from IPython.display import display
+except Exception:  # pragma: no cover
+    def display(obj):  # type: ignore[redefinition]
+        print(obj)
+
+def make_log_reg() -> LogisticRegression:
+    return LogisticRegression(max_iter=500, solver="lbfgs")
+
+stability = RepeatedTrainingStudy(
+    make_log_reg,
+    metric_names=["auroc", "auprc", "f1_pos", "precision_pos", "recall_pos"],
+)
+
+runs_df, summary_df = stability.run(
+        X_train_tab,
+        y_train_tab,
+        X_test_tab,
+        y_test_tab,
+        n_runs=5,
+        random_state=42,
+)
+
+display(runs_df)
+display(summary_df)
 #%%
