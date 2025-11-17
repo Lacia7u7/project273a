@@ -7,7 +7,12 @@ from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional,
 import numpy as np
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
+try:
+    # modern PyG
+    from torch_geometric.loader import DataLoader
+except ImportError:  # older PyG
+    from torch_geometric.data import DataLoader
+
 
 from evaluation.metrics import compute_metrics
 
