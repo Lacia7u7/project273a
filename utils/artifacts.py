@@ -114,5 +114,5 @@ def load_best_artifact(artifacts_dir="artifacts", run_id="latest", map_location=
     artifact_path = run_dir / "best_artifact.pt"
     if not artifact_path.exists():
         raise FileNotFoundError(f"Artifact not found: {artifact_path}")
-    return torch.load(artifact_path, map_location=map_location)
+    return torch.load(artifact_path, map_location=map_location, weights_only=False)
 # ------------------------------------------------------------------------

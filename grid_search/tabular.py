@@ -232,7 +232,7 @@ _ab_lr = _expand_numeric([0.5, 1.0], pct=0.10)
 _ab_grid = {
     "n_estimators": _ab_n_estimators,
     "learning_rate": _ab_lr,
-    "algorithm": ["SAMME.R", "SAMME"],
+    "algorithm": ["SAMME"],
 }
 
 # CatBoost (if available)
