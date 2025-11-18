@@ -1,34 +1,57 @@
-# --- Choose ONE wheel index that matches your Torch/CUDA combo (uncomment exactly one) ---
+# -----------------------------------------------------------------------------
+# PyTorch Geometric wheels (choose ONE index matching your Torch/CUDA version)
+# -----------------------------------------------------------------------------
+# CPU only:
 # -f https://data.pyg.org/whl/torch-2.3.1+cpu.html
+# CUDA 11.8:
 # -f https://data.pyg.org/whl/torch-2.3.1+cu118.html
+# CUDA 12.1:
 # -f https://data.pyg.org/whl/torch-2.3.1+cu121.html
 
-# Core DL stack
+# -----------------------------------------------------------------------------
+# Core deep learning stack
+# -----------------------------------------------------------------------------
 torch>=2.0
 torch_geometric>=2.3
-
+pyg-lib>=0.3.0
 torch-scatter>=2.1.0
 torch-sparse>=0.6.18
-# Optional (some ops/conv variants use these; harmless to include)
+# Optional (used by some GNN ops/conv variants)
 torch-cluster>=1.6.0
 torch-spline-conv>=1.2.2
+dgl>=1.1
 
-# ML & data
-scikit-learn>=1.2
-pandas>=1.3
+# -----------------------------------------------------------------------------
+# ML & data processing
+# -----------------------------------------------------------------------------
 numpy>=1.21
+pandas>=1.3
 scipy>=1.7
+scikit-learn>=1.2
+xgboost>=1.7
+catboost>=1.2
+numexpr>=2.8
+joblib>=1.2
+tqdm-joblib>=0.0.5
+
+# -----------------------------------------------------------------------------
+# Experiment tracking, plotting & reporting
+# -----------------------------------------------------------------------------
 matplotlib>=3.4
+plotly>=5.0
 tensorboard>=2.9
 tqdm>=4.64
-pyarrow>=8.0
 rich>=12.0
-plotly>=5.0
+
+# -----------------------------------------------------------------------------
+# Data formats & statistics
+# -----------------------------------------------------------------------------
+pyarrow>=8.0
 dcor>=0.5
 phik>=0.12
 
-# Configs/validation (you’re on Pydantic v1 APIs)
+# -----------------------------------------------------------------------------
+# Configuration & validation (Pydantic v1 APIs)
+# -----------------------------------------------------------------------------
 pydantic>=1.9,<2
-pyg-lib
-tqdm-joblib
-catboost
+omegaconf>=2.3

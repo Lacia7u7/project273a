@@ -1,0 +1,311 @@
+{
+    "data": {
+        "csv_path": "raw/diabetic_data.csv",
+        "ids_mapping_path": "raw/IDS_mapping.csv",
+        "identifier_cols": {
+            "encounter_id": "encounter_id",
+            "patient_id": "patient_nbr"
+        },
+        "target": {
+            "name": "readmitted",
+            "positive_values": [
+                "<30"
+            ],
+            "binarized_name": "readmitted_binary"
+        },
+        "filters": {
+            "min_los": null,
+            "max_los": null,
+            "exclude_discharge_to_ids": [
+                11,
+                13,
+                14,
+                19,
+                20,
+                21
+            ],
+            "first_encounter_per_patient": true
+        },
+        "columns": {
+            "numeric": [
+                "time_in_hospital",
+                "num_lab_procedures",
+                "num_procedures",
+                "num_medications",
+                "number_outpatient",
+                "number_emergency",
+                "number_inpatient",
+                "number_diagnoses"
+            ],
+            "categorical_low_card": [
+                "race",
+                "gender",
+                "age",
+                "max_glu_serum",
+                "A1Cresult",
+                "change",
+                "diabetesMed"
+            ],
+            "icd_cols": [
+                "diag_1",
+                "diag_2",
+                "diag_3"
+            ],
+            "drug_cols": [
+                "metformin",
+                "repaglinide",
+                "nateglinide",
+                "chlorpropamide",
+                "glimepiride",
+                "acetohexamide",
+                "glipizide",
+                "glyburide",
+                "tolbutamide",
+                "pioglitazone",
+                "rosiglitazone",
+                "acarbose",
+                "miglitol",
+                "troglitazone",
+                "tolazamide",
+                "examide",
+                "citoglipton",
+                "insulin",
+                "glyburide-metformin",
+                "glipizide-metformin",
+                "glimepiride-pioglitazone",
+                "metformin-rosiglitazone",
+                "metformin-pioglitazone"
+            ],
+            "hospital_col": null,
+            "specialty_col": "medical_specialty",
+            "admission_type_col": "admission_type_id",
+            "admission_source_col": "admission_source_id",
+            "discharge_disposition_col": "discharge_disposition_id",
+            "encounter_features": []
+        },
+        "preprocessing": {
+            "numeric_imputer": "mean",
+            "categorical_imputer": "most_frequent",
+            "scaler": "standard",
+            "categorical_handling": "onehot",
+            "use_unknown_category": true,
+            "unknown_label": "UNKNOWN",
+            "min_freq_for_category": 5,
+            "truncate_icd_to_3_digits": true,
+            "map_icd_to_group": true,
+            "map_drug_to_class": true
+        },
+        "splits": {
+            "strategy": "group_k_fold",
+            "group_by": "patient",
+            "n_splits": 5,
+            "seed": 42,
+            "stratify_by_target": true
+        }
+    },
+    "graph": {
+        "node_types_enabled": {
+            "encounter": true,
+            "icd": true,
+            "icd_group": true,
+            "drug": true,
+            "drug_class": true,
+            "specialty": true,
+            "admission_type": true,
+            "discharge_disposition": true,
+            "admission_source": true,
+            "hosp": true
+        },
+        "edge_types_enabled": {
+            "encounter__has_icd__icd": true,
+            "icd__is_a__icd_group": true,
+            "encounter__has_drug__drug": true,
+            "drug__belongs_to__drug_class": true,
+            "encounter__has_specialty__specialty": true,
+            "encounter__has_admission_type__admission_type": true,
+            "encounter__has_discharge__discharge_disposition": true,
+            "encounter__has_admission_source__admission_source": true,
+            "reverse_edges": true
+        },
+        "edge_featuring": {
+            "has_drug": {
+                "relation_subtypes_by_status": true,
+                "edge_attr_status": true
+            }
+        },
+        "fanouts": {
+            "encounter__has_icd__icd": [
+                10,
+                5,
+                3
+            ],
+            "encounter__has_drug__drug": [
+                10,
+                5,
+                3
+            ],
+            "encounter__has_specialty__specialty": [
+                -1
+            ],
+            "encounter__has_admission_type__admission_type": [
+                -1
+            ],
+            "encounter__has_discharge__discharge_disposition": [
+                -1
+            ],
+            "encounter__has_admission_source__admission_source": [
+                -1
+            ],
+            "icd__is_a__icd_group": [
+                -1
+            ],
+            "drug__belongs_to__drug_class": [
+                -1
+            ],
+            "reverse_edges": [
+                10,
+                5,
+                3
+            ]
+        },
+        "feature_dims": {},
+        "oov_nodes": true,
+        "artifacts_dir": "./artifacts"
+    },
+    "model": {
+        "arch": "RGCN",
+        "hidden_dim": 128,
+        "num_layers": 3,
+        "dropout": 0.45,
+        "heads": 4,
+        "rgcn_bases": 4,
+        "act": "relu",
+        "norm": null,
+        "use_edge_attr_for_drug_status": false,
+        "loss": {
+            "type": "bce_with_logits",
+            "pos_weight": "none"
+        }
+    },
+    "train": {
+        "epochs": 60,
+        "early_stopping_patience": 8,
+        "early_stopping_metric": "auprc",
+        "optimizer": {
+            "name": "AdamW",
+            "lr": 0.0005,
+            "weight_decay": 0.1
+        },
+        "scheduler": {
+            "name": null,
+            "warmup_epochs": 0
+        },
+        "batching": {
+            "batch_size_encounters": 1024
+        },
+        "val_every": 1,
+        "gradient_clip_norm": 2.0,
+        "deterministic": true,
+        "seed": 42,
+        "tensorboard_logdir": "./tb_logs",
+        "save_best_on": "auprc"
+    },
+    "evaluation": {
+        "metrics_primary": [
+            "auprc",
+            "auroc",
+            "f1_pos"
+        ],
+        "metrics_secondary": [
+            "precision_pos",
+            "recall_pos",
+            "specificity",
+            "balanced_accuracy",
+            "brier",
+            "logloss"
+        ],
+        "threshold_tuning": {
+            "optimize_for": "f1_pos",
+            "grid": [],
+            "calibration": null
+        },
+        "plots": {
+            "roc": true,
+            "pr": true,
+            "calibration": true,
+            "confusion": true,
+            "decision_curves": true
+        },
+        "subgroup_metrics": []
+    },
+    "inference": {
+        "inductive": true,
+        "build_star_subgraph_on_the_fly": true,
+        "oov_handling": "UNKNOWN",
+        "batch_predict_csv_path": null,
+        "output_predictions_path": "artifacts/predictions.csv"
+    },
+    "baseline": {
+        "tabular_mlp": {
+            "enabled": false,
+            "hidden_dims": [],
+            "dropout": 0.0,
+            "epochs": 10,
+            "batch_size": 256,
+            "optimizer": {
+                "name": "Adam",
+                "lr": 0.001,
+                "weight_decay": 0.0
+            }
+        },
+        "xgboost": {}
+    },
+    "path": {
+        "artifacts_dir": "artifacts/",
+        "tb_log_dir": "artifacts/tb_logs/",
+        "logs_dir": "logs/"
+    },
+    "system": {
+        "cpu": {
+            "intra_op_threads": null,
+            "inter_op_threads": null,
+            "omp_num_threads": null,
+            "mkl_num_threads": null,
+            "kmp_affinity": "granularity=fine,compact,1,0",
+            "start_method": "forkserver",
+            "pin_affinity_cores": null
+        },
+        "dataloader": {
+            "num_workers": 6,
+            "prefetch_factor": 4,
+            "persistent_workers": true,
+            "pin_memory": true,
+            "pin_memory_device": "cuda",
+            "non_blocking": true
+        },
+        "cuda": {
+            "enabled": true,
+            "device_ids": null,
+            "allow_tf32": true,
+            "matmul_precision": "high",
+            "cudnn_benchmark": true,
+            "cudnn_deterministic": null,
+            "amp": false,
+            "amp_dtype": "bf16",
+            "grad_scaler_enabled": true,
+            "compile_mode": "reduce-overhead",
+            "compile_fullgraph": true,
+            "uva": true
+        },
+        "ddp": {
+            "enabled": false,
+            "backend": "nccl",
+            "find_unused_parameters": false,
+            "gradient_as_bucket_view": true,
+            "broadcast_buffers": false,
+            "static_graph": false
+        },
+        "numexpr_threads": 4,
+        "deterministic": false
+    }
+}

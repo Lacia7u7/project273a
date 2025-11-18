@@ -1,0 +1,28 @@
+RGCNModel(
+  (proj): TypewiseInputProjector(
+    (embed_layers): ModuleDict(
+      (icd): Embedding(814, 128, padding_idx=0)
+      (icd_group): Embedding(814, 128, padding_idx=0)
+      (drug): Embedding(23, 128, padding_idx=0)
+      (drug_class): Embedding(1, 128, padding_idx=0)
+      (admission_type): Embedding(9, 128, padding_idx=0)
+      (discharge_disposition): Embedding(22, 128, padding_idx=0)
+      (admission_source): Embedding(17, 128, padding_idx=0)
+      (specialty): Embedding(66, 128, padding_idx=0)
+    )
+    (lin_layers): ModuleDict(
+      (encounter): Linear(in_features=36, out_features=128, bias=True)
+    )
+    (act): ReLU()
+    (drop): Dropout(p=0.0, inplace=False)
+  )
+  (convs): ModuleList(
+    (0-2): 3 x RGCNConv(128, 128, num_relations=20)
+  )
+  (act): ReLU()
+  (drop): Dropout(p=0.45, inplace=False)
+  (classifier): EncounterClassifier(
+    (drop): Dropout(p=0.0, inplace=False)
+    (lin): Linear(in_features=128, out_features=1, bias=True)
+  )
+)

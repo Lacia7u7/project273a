@@ -1,4 +1,3 @@
-# ---- place in a utils/system.py (or a notebook cell) and call it right after loading `config`
 import os, sys, math
 import torch
 import numexpr as ne

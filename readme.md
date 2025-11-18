@@ -1,55 +1,70 @@
 # Diabetes Readmission Prediction with Heterogeneous Graph Neural Network
 
-This repository contains a full pipeline for predicting 30-day readmission of diabetic patients using a heterogeneous graph neural network (GNN) with PyTorch Geometric. The pipeline is orchestrated in a single Jupyter Notebook (`main.ipynb`) and uses a modular `src/` codebase for data processing, model definition, training, and evaluation.
+This repository contains a full pipeline for predicting 30-day readmission of diabetic patients using heterogeneous graph neural networks (HGT, R-GCN, GraphSAGE) implemented with PyTorch Geometric. The notebook `main.ipynb` orchestrates the end-to-end workflow while the supporting Python packages under `data/`, `graph/`, `models/`, `train/`, and `evaluation/` let you script and reuse each stage independently.
 
+Final reports and figures saved in a dedicated reports/ folder. (Figures, csv, configs, final report)
 ## Requirements
-Install the required packages (see `requirements.txt`). Key libraries include:
-- Python 3.x
-- PyTorch (with CUDA support if available)
-- PyTorch Geometric (matching your PyTorch/CUDA version)
-- scikit-learn, pandas, numpy, scipy
-- torchmetrics, tensorboard, tqdm, pyarrow, rich
+Python 3.10+ is recommended. Install dependencies with:
 
-**Note**: Ensure PyG is installed properly (refer to PyG installation instructions for the correct CUDA wheels).
+```
+python -m pip install -r requirements.txt
+```
+
+Key packages include:
+
+- PyTorch + PyTorch Geometric (and optional DGL neighbor loaders). Uncomment the wheel index in `requirements.txt` that matches your CUDA/Torch combo before installing.
+- Scientific Python stack: numpy, pandas, scipy, scikit-learn, matplotlib, tensorboard, numexpr, joblib, tqdm, tqdm-joblib.
+- Configuration & utilities: pydantic (v1), omegaconf.
+- Visualisation & data exploration: plotly, dcor, phik.
+- Baseline/tabular models: xgboost, catboost.
+
+**Note**: PyTorch Geometric requires CUDA-specific wheels. Follow https://pytorch-geometric.readthedocs.io/en/latest/notes/installation.html if you need GPU support.
 
 ## Repository Structure
-* main.ipynb # Notebook orchestrating the entire pipeline
-* README.md
-* requirements.txt
-* src/
-* data/ ... # Data loading, preprocessing, vocab, mapping, splits
-* graph/ ... # Graph construction, inductive subgraph, sampling
-* models/ ... # Heterogeneous GNN model definitions (HGT, RGCN, GraphSAGE) and heads
-* train/ ... # Training loop, metrics, calibration, threshold tuning
-* infer/ ... # Batch prediction for new data
-* utils/ ... # Config schema, logging, seeding, I/O utilities
-* tests/ ... # Basic tests for vocabs, graph builder, splits
-
+* `main.ipynb` / `main.py` – orchestrate the full experiment (data prep → graph building → model training → evaluation).
+* `data/` – loaders, filters, preprocessing, vocabularies, and split helpers.
+* `graph/` – hetero graph builders plus inductive inference helpers.
+* `models/` – HGT, R-GCN, and GraphSAGE backbones plus classification heads.
+* `train/` – data loaders, optimizer utilities, and the AMP-aware training loop.
+* `evaluation/` – calibration, metrics, reporting utilities, and rich data exploration plots.
+* `benchmarks/` – fast tabular baselines (logistic regression, random forest, XGBoost, CatBoost, KNN).
+* `grid_search/` – reusable grid-search runners for graph models and tabular models.
+* `infer/` – helpers for batch inference on new encounters.
+* `utils/` – config schema, logging, artifact helpers, IO utilities, and system tuning helpers.
+* `tests/` – lightweight unit tests for data vocabularies, graph builders, sampling, and evaluation helpers.
+* `raw/` & `data/` – expected locations for the CSV inputs and cached/intermediate artifacts.
 
 ## How to Run
-1. Open `main.ipynb` in Jupyter. It contains numbered sections with explanations and code.
-2. **Configuration**: The notebook includes a JSON config cell (`Section 2`) where you can adjust paths and parameters. By default it expects `diabetic_data.csv` and `IDS_mapping.csv` in appropriate paths.
-3. **Run Pipeline**: Execute the notebook cells in order. The pipeline will:
-   - Load and preprocess data (filter out certain encounters, handle missing values, encode features).
-   - Split data into train/validation/test ensuring no leakage (grouped by patient).
-   - Construct a heterogeneous graph for each split with nodes for encounters, diagnoses (ICDs and groups), medications (drugs and classes), hospital, specialty, admission/discharge types, etc., and edges linking them.
-   - Train a heterogeneous GNN (HGT by default) with neighbor sampling and early stopping.
-   - Evaluate on validation/test sets with metrics: AUROC, AUPRC, F1, precision/recall, balanced accuracy, Brier score, ECE.
-   - Perform probability calibration (Platt or isotonic) and threshold tuning to optimize F1.
-   - Plot ROC, PR, calibration curve, confusion matrix, and decision curves. Compute subgroup metrics by age, race, gender, hospital.
-   - Train baseline tabular model (MLP) for comparison and evaluate similarly.
-   - Demonstrate inductive inference: predicting readmission for new encounters by building a star subgraph and using the trained model.
-4. **TensorBoard Logs**: Training and evaluation metrics are logged to TensorBoard (log directory configurable, default `./tb_logs`). Launch TensorBoard to monitor training progress and view plots.
-5. **Artifacts**: All important artifacts (model checkpoint, scalers, vocabularies, thresholds, calibration model, metrics and plots) are saved under `artifacts/` directory for reuse.
+1. Download the public diabetes readmission dataset plus `IDS_mapping.csv` and place them under `raw/` (see the defaults in `config_dict` inside `main.ipynb`).
+2. Adjust the configuration JSON in Section 2 of the notebook (or inside `main.py`) to point to your data files, tweak graph settings, and pick a backbone architecture.
+3. Run `main.ipynb` in Jupyter/Colab (or mirror the sequence inside your own script). The numbered cells:
+   - Load the CSVs, filter encounters, and build train/validation/test splits that respect patient grouping.
+   - Preprocess features (imputation, rare-category handling, one-hot encoding) and persist scalers/encoders.
+   - Construct heterogeneous graphs via `graph.builder.build_heterodata` for each split.
+   - Instantiate a GNN from `models/` and train it with the AMP-aware `train.loop.Trainer`, logging metrics to TensorBoard.
+   - Evaluate predictions with `evaluation.evaluation` (metrics, threshold tuning, calibration, subgroup reports) and generate interactive figures from `evaluation.model_evaluator` / `evaluation.data_exploration`.
+   - Optionally train tabular baselines (`benchmarks/train_and_eval_baselines`) for comparison.
+4. Artifacts (model checkpoints, configs, scalers, calibration models, and plots) are stored under `artifacts/`. `utils.artifacts.save_best_artifact` keeps a `latest` pointer for quick reuse.
+5. To drive the pipeline from a pure Python script, import `Config` from `utils.config`, call the functions in `data/` and `graph/`, and instantiate `train.loop.Trainer` with loaders from `train/loader.py`.
 
 ## Inductive Inference
-The pipeline supports inductive inference. Given a new patient encounter (not seen during training), the code will construct a star graph connecting the encounter to relevant entity nodes (ICDs, drugs, etc., using `"UNKNOWN"` nodes for unseen categories) and then apply the GNN to generate a prediction. Results for batch inference can be saved to a CSV.
+`graph.inductive.build_star_graph_for_row` reuses the same vocabularies to build a star graph around a single encounter. This lets you score unseen patients by loading the saved vocabs, creating the star graph on-the-fly, and running the trained GNN head. The `infer/` package contains helpers for batching predictions and exporting CSVs.
+
+## Hyper-parameter search & baselines
+- `grid_search/tabular.py` and `grid_search/rgcn_fast.py` provide joblib+tqdm powered sweeps with optional CUDA MPS helpers. Configure them by passing the `Config` object and a data factory callable.
+- `benchmarks/baselines.py` trains Logistic Regression, Random Forest, XGBoost, CatBoost, and KNN references to contextualise GNN performance.
 
 ## Running Tests
 Basic unit tests are provided in the `tests/` directory. You can run these tests to verify that:
 - Unknown token handling in vocab works (`test_vocabs.py`).
 - Graph builder creates expected nodes/edges and adds reverse edges correctly (`test_graph_builder.py`).
 - Group splits have no patient overlap (`test_splits.py`).
+
+Run the full suite with:
+
+```
+pytest tests
+```
 
 ## Notes
 This notebook and codebase are designed for clarity and completeness. For actual production use, some optimization and tuning might be necessary. The model variants (HGT, R-GCN, GraphSAGE) are all implemented; you can switch the `model.arch` in the config to try different GNN types. Calibration and threshold selection are performed on validation data to optimize final performance.
